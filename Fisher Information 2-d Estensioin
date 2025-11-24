@@ -1,0 +1,23 @@
+%Fisher information for 2-d stimulus
+
+function FI = fisher_information_matrix(f1_prime, f2_prime, Sigma, ridge)
+% Computes Fisher Information Matrix for 2-D stimulus:
+% I_ij = f'_i^T * Sigma^{-1} * f'_j
+
+    if nargin < 4
+        ridge = 1e-6;
+    end
+
+    N = size(Sigma,1);
+    Sigma_reg = Sigma + ridge * eye(N);
+
+    a1 = Sigma_reg \ f1_prime';   % Sigma^{-1} f'_1
+    a2 = Sigma_reg \ f2_prime';   % Sigma^{-1} f'_2
+
+    I11 = f1_prime * a1;
+    I22 = f2_prime * a2;
+    I12 = f1_prime * a2;          % = I21
+
+    FI = [I11, I12;
+          I12, I22];
+end
