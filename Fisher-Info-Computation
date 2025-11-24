@@ -1,0 +1,52 @@
+%Fisher Information computation from spike counts/ rates
+
+clear; close all; clc;
+
+% ---------------------------
+% Example usage
+% ---------------------------
+
+K = 200; N = 100;
+ds = 0.01;
+
+spikes_minus = poissrnd(5, K, N);
+spikes_0     = poissrnd(6, K, N);
+spikes_plus  = poissrnd(7, K, N);
+
+[f_minus, Sigma_minus] = estimate_tuning_and_cov(spikes_minus);
+[f_0,     Sigma_0]     = estimate_tuning_and_cov(spikes_0);
+[f_plus,  Sigma_plus]  = estimate_tuning_and_cov(spikes_plus);
+
+f_prime = finite_diff_derivative(f_plus, f_minus, ds);
+
+FI_s0 = fisher_information(f_prime, Sigma_0);
+
+disp(['FI(s0) = ', num2str(FI_s0)]);
+
+
+function [f_mean, Sigma] = estimate_tuning_and_cov(spike_counts)
+% spike_counts: K x N matrix
+%   K trials/windows, N neurons
+
+    f_mean = mean(spike_counts, 1);   % 1 x N mean spike-count tuning curve
+    Sigma  = cov(spike_counts, 1);    % N x N covariance (normalizes by K)
+end
+
+function f_prime = finite_diff_derivative(f_plus, f_minus, ds)
+% f_plus, f_minus: 1 x N mean spike-count vectors
+% ds: scalar
+
+    f_prime = (f_plus - f_minus) / (2*ds);
+end
+
+function FI = fisher_information(f_prime, Sigma, ridge)
+% Computes FI = f'(s)^T Σ^{-1} f'(s)
+
+    if nargin < 3
+        ridge = 1e-6;
+    end
+
+    N = size(Sigma, 1);
+    Sigma_reg = Sigma + ridge * eye(N);
+    FI = f_prime * (Sigma_reg \ f_prime');  % (1xN)*(NxN)^-1*(Nx1) -> scalar
+end
