@@ -1,23 +1,45 @@
-%Fisher information for 2-d stimulus
+% Fisher information for 2-D stimulus with differential correlations
+%
+% Sigma_reg(s) = Sigma0 + epsilon * fprime_cov * fprime_cov'
+% I_ij = f'_i^T * Sigma_reg^{-1} * f'_j
 
-function FI = fisher_information_matrix(f1_prime, f2_prime, Sigma, ridge)
-% Computes Fisher Information Matrix for 2-D stimulus:
-% I_ij = f'_i^T * Sigma^{-1} * f'_j
+function FI = fisher_information_matrix(f1_prime, f2_prime, Sigma0, epsilon, fprime_cov)
 
-    if nargin < 4
-        ridge = 1e-6; %epsilon
+    % Defaults
+    if nargin < 4 || isempty(epsilon)
+        epsilon = 0;   % no differential correlations by default
     end
 
-    N = size(Sigma,1);
-    Sigma_reg = Sigma + ridge * eye(N);
+    % If no specific f'(s) for the covariance is provided, default to f1_prime
+    if nargin < 5 || isempty(fprime_cov)
+        fprime_cov = f1_prime;
+    end
 
-    a1 = Sigma_reg \ f1_prime';   % Sigma^{-1} f'_1
-    a2 = Sigma_reg \ f2_prime';   % Sigma^{-1} f'_2
+    % Ensure column vectors where appropriate
+    f1_prime = f1_prime(:)';  % keep row for consistency with your original style
+    f2_prime = f2_prime(:)';
+    fprime_cov = fprime_cov(:);  % column vector for outer product
 
+    % Baseline dimension check
+    N = size(Sigma0,1);
+
+    % Build stimulus-dependent covariance:
+    % Sigma_reg = Sigma0 + epsilon * f'(s) f'(s)^T
+    Sigma_reg = Sigma0 + epsilon * (fprime_cov * fprime_cov.');
+
+    % (Optional) tiny numerical jitter to avoid singular matrix errors:
+    % Sigma_reg = Sigma_reg + 1e-8 * eye(N);
+
+    % Solve Sigma_reg^{-1} * f'_i using backslash
+    a1 = Sigma_reg \ f1_prime';   % Sigma_reg^{-1} f'_1
+    a2 = Sigma_reg \ f2_prime';   % Sigma_reg^{-1} f'_2
+
+    % Fisher information entries
     I11 = f1_prime * a1;
     I22 = f2_prime * a2;
-    I12 = f1_prime * a2;          % = I21
+    I12 = f1_prime * a2;          % = I21 by symmetry
 
+    % 2x2 Fisher information matrix
     FI = [I11, I12;
           I12, I22];
 end
