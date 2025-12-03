@@ -5,7 +5,7 @@ function FI = fisher_information_matrix(f1_prime, f2_prime, Sigma, ridge)
 % I_ij = f'_i^T * Sigma^{-1} * f'_j
 
     if nargin < 4
-        ridge = 1e-6;
+        ridge = 1e-6; %epsilon
     end
 
     N = size(Sigma,1);
