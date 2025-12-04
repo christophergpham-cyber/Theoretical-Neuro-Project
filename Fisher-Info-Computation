@@ -1,36 +1,52 @@
-% Fisher Information computation from spike counts/ rates
-% with stimulus-dependent covariance:
-%   Sigma(s0) = Sigma_0 + epsilon * f'(s0) f'(s0)^T
+% Fisher Information computation from spike counts / rates
+% Linear Fisher information at s0 using Eq. (51):
+%   s0 = 182.5 Hz, s1 = 180 Hz, s2 = 185 Hz
+%   f'(s0) ≈ (f(s2) - f(s1)) / (s2 - s1)
+%   I_lin(s0) = f'(s0)^T Σ(s0)^{-1} f'(s0)
 
 clear; close all; clc;
 
 % ---------------------------
-% Example usage
+% Stimulus values (in Hz)
+% ---------------------------
+s0 = 182.5;   % center stimulus
+s1 = 180;     % lower stimulus
+s2 = 185;     % upper stimulus
+
+delta_s = s2 - s1;   % 5 Hz
+
+K  = 200;    % number of trials
+N  = 100;    % number of neurons
+
+% ---------------------------
+% Example: placeholder spike generation
+% In your real code, replace these with LIF network simulations:
+%   spikes_s1 = lif_network_sim(s1, ...);
+%   spikes_s0 = lif_network_sim(s0, ...);
+%   spikes_s2 = lif_network_sim(s2, ...);
 % ---------------------------
 
-K  = 200; 
-N  = 100;
-ds = 0.01;
+% Here we just use Poisson noise with some arbitrary dependence on s:
+rate_s1 = 0.03 * s1;   % e.g. 0.03 spikes/Hz * s
+rate_s0 = 0.03 * s0;
+rate_s2 = 0.03 * s2;
 
-% Example: simple Poisson data around three nearby stimuli
-spikes_minus = poissrnd(5, K, N);
-spikes_0     = poissrnd(6, K, N);
-spikes_plus  = poissrnd(7, K, N);
+spikes_s1 = poissrnd(rate_s1, K, N);   % responses at s1
+spikes_s0 = poissrnd(rate_s0, K, N);   % responses at s0
+spikes_s2 = poissrnd(rate_s2, K, N);   % responses at s2
 
-[f_minus, Sigma_minus] = estimate_tuning_and_cov(spikes_minus);
-[f_0,     Sigma_0]     = estimate_tuning_and_cov(spikes_0);
-[f_plus,  Sigma_plus]  = estimate_tuning_and_cov(spikes_plus);
+% Estimate tuning and covariance for each stimulus
+[f_s1, Sigma_s1] = estimate_tuning_and_cov(spikes_s1);
+[f_s0, Sigma_s0] = estimate_tuning_and_cov(spikes_s0);
+[f_s2, Sigma_s2] = estimate_tuning_and_cov(spikes_s2);
 
-% Finite-difference derivative of tuning at s0
-f_prime = finite_diff_derivative(f_plus, f_minus, ds);
+% Finite-difference derivative of tuning at s0 using s1 and s2
+f_prime_s0 = finite_diff_derivative(f_s2, f_s1, delta_s);
 
-% Strength of differential correlations (ε)
-epsilon = 0.01;   % adjust this as desired
+% Linear Fisher information at s0 using Eq. (51)
+FI_s0 = fisher_information_linear(f_prime_s0, Sigma_s0);
 
-% By default, covariance term uses f_prime for f'(s) in Σ0 + ε f' f'^T
-FI_s0 = fisher_information(f_prime, Sigma_0, epsilon);
-
-disp(['FI(s0) = ', num2str(FI_s0)]);
+disp(['Linear FI at s0 = ', num2str(s0), ' Hz:  ', num2str(FI_s0)]);
 
 
 % ---------------------------
@@ -45,42 +61,27 @@ function [f_mean, Sigma] = estimate_tuning_and_cov(spike_counts)
     Sigma  = cov(spike_counts, 1);    % N x N covariance (normalizes by K)
 end
 
-function f_prime = finite_diff_derivative(f_plus, f_minus, ds)
-% f_plus, f_minus: 1 x N mean spike-count vectors
-% ds: scalar
+function f_prime = finite_diff_derivative(f_s2, f_s1, delta_s)
+% f_s2, f_s1: 1 x N mean spike-count vectors at s2 and s1
+% delta_s: s2 - s1 (scalar)
 
-    f_prime = (f_plus - f_minus) / (2*ds);
+    f_prime = (f_s2 - f_s1) / delta_s;  % central derivative at s0
 end
 
-function FI = fisher_information(f_prime, Sigma0, epsilon, fprime_cov)
-% Computes FI with differential correlations:
-%   Sigma_reg = Sigma0 + epsilon * f'(s) f'(s)^T
-%   FI = f'(s)^T * Sigma_reg^{-1} * f'(s)
+function FI = fisher_information_linear(f_prime, Sigma0, ridge)
+% Linear Fisher information:
+%   I = f'(s0)^T Σ(s0)^{-1} f'(s0)
+%
+% ridge is optional tiny diagonal regularization for numerical stability.
 
-    % Defaults
-    if nargin < 3 || isempty(epsilon)
-        epsilon = 0;   % no differential correlations by default
+    if nargin < 3
+        ridge = 1e-8;
     end
 
-    % Use f_prime as the covariance direction if none provided
-    if nargin < 4 || isempty(fprime_cov)
-        fprime_cov = f_prime;
-    end
-
-    % Ensure shapes
-    f_prime    = f_prime(:)';      % row vector 1 x N
-    fprime_cov = fprime_cov(:);    % column vector N x 1
-
-    % Baseline covariance dimension
+    f_prime = f_prime(:)';        % ensure row vector 1 x N
     N = size(Sigma0, 1);
 
-    % Stimulus-dependent covariance:
-    % Sigma_reg = Sigma0 + epsilon * f'(s) f'(s)^T
-    Sigma_reg = Sigma0 + epsilon * (fprime_cov * fprime_cov.');
+    Sigma_reg = Sigma0 + ridge * eye(N);  % small jitter
 
-    % (Optional) tiny jitter for numerical stability, if needed:
-    % Sigma_reg = Sigma_reg + 1e-8 * eye(N);
-
-    % Fisher information: scalar
-    FI = f_prime * (Sigma_reg \ f_prime');  % (1xN) * (NxN)^-1 * (Nx1)
+    FI = f_prime * (Sigma_reg \ f_prime');  % scalar
 end
