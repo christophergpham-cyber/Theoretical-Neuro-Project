@@ -1,0 +1,128 @@
+% fig7c_multilines.m
+% Reproduce Figure 7c-style FI curves for different training sample sizes:
+%   M = 400, 800, 1600, 2400, 4000
+
+clear; clc; close all;
+
+%% Stimulus values (used in the paper)
+s1 = 180;
+s2 = 185;
+s0 = (s1 + s2) / 2;
+delta_s = s2 - s1;
+
+% Population parameters
+N_pop    = 1000;            % large true population ("infinite" population)
+N_values = 10:10:600;       % number of simultaneously recorded neurons
+
+%% Training sample sizes (M)
+M_list = [400, 800, 1600, 2400, 4000];
+colors = lines(length(M_list));   % one color per M
+
+M_test  = 1000;              % fixed number of test trials
+
+%% Differential correlation parameters (TUNED FOR FI ~ 200)
+sigma_ind = 1.0;              % independent noise std
+sigma_s   = 1/sqrt(200);      % shared noise std -> asymptote ~ 200
+
+
+%% Define tuning curves for full population
+rng(1);
+scale_b = 3;                   % increase slope magnitude
+b_full  = scale_b * randn(N_pop,1);        % slope = f'(s0)
+f0_full = 20 + 5*randn(N_pop,1);           % random baseline firing rates
+
+%% Build full covariance matrix Σ = σ_ind^2 I + σ_s^2 f'f'^T
+Sigma_full = sigma_ind^2 * eye(N_pop) + sigma_s^2 * (b_full * b_full');
+
+%% Compute true asymptotic Fisher information
+FI_true = b_full' * (Sigma_full \ b_full);
+
+fprintf("True full population FI = %.4f\n", FI_true);
+
+%% Figure setup
+figure; hold on;
+
+%% Loop over different training sample sizes M
+for m = 1:length(M_list)
+    M_train = M_list(m);
+
+    FI_est = zeros(size(N_values));
+
+    for idx = 1:numel(N_values)
+        N = N_values(idx);
+
+        % choose subset of neurons (first N for simplicity)
+        idxN = 1:N;
+        b_N  = b_full(idxN);
+        f0_N = f0_full(idxN);
+
+        % covariance for this subset
+        Sig_N = Sigma_full(idxN, idxN);
+        L_N = chol(Sig_N + 1e-8*eye(N), 'lower');
+
+        % ---------------- TRAINING DATA ----------------
+        R_train_s1 = simulate_responses_gauss(s1, s0, M_train, f0_N, b_N, L_N);
+        R_train_s2 = simulate_responses_gauss(s2, s0, M_train, f0_N, b_N, L_N);
+
+        X_train = [R_train_s1; R_train_s2];           % responses
+        y_train = [s1*ones(M_train,1); s2*ones(M_train,1)];
+
+        % Locally optimal linear estimator (ridge regression)
+        lambda = 1e-3;
+        w = (X_train' * X_train + lambda*eye(N)) \ (X_train' * y_train);
+
+        % ---------------- TEST DATA ----------------
+        R_test_s1 = simulate_responses_gauss(s1, s0, M_test, f0_N, b_N, L_N);
+        R_test_s2 = simulate_responses_gauss(s2, s0, M_test, f0_N, b_N, L_N);
+
+        shat_s1 = R_test_s1 * w;
+        shat_s2 = R_test_s2 * w;
+
+        % ---------------- FISHER INFORMATION ----------------
+        FI_est(idx) = fisher_information_from_decoded(shat_s1, shat_s2, s1, s2);
+    end
+
+    % Plot this M curve
+    plot(N_values, FI_est, '-o', ...
+         'DisplayName', sprintf('M = %d', M_train), ...
+         'Color', colors(m,:), 'LineWidth', 1.7, 'MarkerSize', 5);
+end
+
+% Plot horizontal asymptotic FI
+yline(FI_true, 'k--', 'LineWidth', 2, 'DisplayName', 'True FI (infinite population)');
+
+xlabel('Number of simultaneously recorded neurons N');
+ylabel('Fisher information');
+title('Reproduction of Figure 7c (Moreno-Bote et al. 2014)');
+grid on;
+legend('Location', 'Southeast');
+hold off;
+
+
+% ========================================================================
+% Helper functions
+% ========================================================================
+
+function R = simulate_responses_gauss(s, s0, M, f0, b, L)
+% Gaussian population with differential correlations:
+%   r ~ N( f(s), Σ ),   f(s) = f0 + b (s - s0)
+    mu = f0 + b * (s - s0);     % mean response
+    z  = randn(length(mu), M);  % Gaussian noise
+    R  = (mu + L*z)';           % M x N responses
+end
+
+function FI = fisher_information_from_decoded(shat_s1, shat_s2, s1, s2)
+% Fisher information from decoding:
+%   I = [ ( <ŝ>_s1 - <ŝ>_s2 ) / (s1 - s2) ]^2 ...
+%       / ( 0.5 * (Var(ŝ|s1) + Var(ŝ|s2)) )
+
+    mean_s1 = mean(shat_s1);
+    mean_s2 = mean(shat_s2);
+
+    dshat_ds = (mean_s1 - mean_s2) / (s1 - s2);
+
+    var_s1 = var(shat_s1, 1);
+    var_s2 = var(shat_s2, 1);
+
+    FI = dshat_ds^2 / (0.5*(var_s1 + var_s2));
+end
